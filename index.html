@@ -3,7 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="description" content="Register: an 8-bit LFSR drives sine, noise, pulse, sub kick and a long reverb through Web Audio.">
+<meta name="description" content="An 8-bit LFSR becomes a barcode, then sine waves, noise, high pulses and a 41 Hz sub kick, with one long reverb note every 2 bars. Web Audio edition of the Pico 2 instrument.">
+<link rel="icon" type="image/png" href="favicon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="PlantsSystem">
+<meta property="og:title" content="Register">
+<meta property="og:description" content="An 8-bit LFSR becomes a barcode, then sine waves, noise, high pulses and a 41 Hz sub kick, with one long reverb note every 2 bars. Web Audio edition of the Pico 2 instrument.">
+<meta property="og:url" content="https://plantssystem.github.io/REGISTER/">
+<meta property="og:image" content="https://plantssystem.github.io/REGISTER/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Register">
+<meta name="twitter:description" content="An 8-bit LFSR becomes a barcode, then sine waves, noise, high pulses and a 41 Hz sub kick, with one long reverb note every 2 bars. Web Audio edition of the Pico 2 instrument.">
+<meta name="twitter:image" content="https://plantssystem.github.io/REGISTER/og-image.png">
 </head>
 <body>
 <title>Register</title>
@@ -64,6 +77,9 @@ button.b:active{transform:translateY(1px)}
 .notes p{margin:0;font-size:12px;max-width:44ch}
 .notes b{display:block;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:400;margin-bottom:3px}
 .msg{min-height:1.5em;color:var(--dim);font-size:11px;margin:0}
+.brand{margin-top:40px;background:#000;color:#8a9288;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 24px;padding:14px 20px}
+.brand img{display:block;height:46px;width:auto;max-width:100%}
+.brand span{font-size:11px;letter-spacing:.06em}
 @media (prefers-reduced-motion:reduce){button.b:active{transform:none}}
 </style>
 
@@ -115,6 +131,10 @@ button.b:active{transform:translateY(1px)}
     <p><b>Sub &amp; reverb</b>A 41 Hz sub kick on every 16th. One long-reverb note (RT60 about 7 s) lands somewhere in every 2 bars. 超低域の16ビートと、2小節に1音のロングリバーブ。</p>
     <p><b>Screen</b>The tesseract's pose is the number. Left column: LFSR value. Right column: raw counter. Barcode: last ten steps. 立体の姿勢が数値。</p>
   </section>
+  <footer class="brand">
+    <img src="plantssystem-logo.png" width="472" height="128" alt="PlantsSystem">
+    <span>Pico 2 / RP2350 · Web Audio edition</span>
+  </footer>
 </main>
 
 <script>
