@@ -41,7 +41,9 @@ html,body{margin:0}
 body{background:var(--bg);color:var(--fg);font:13px/1.55 var(--mono);
   padding-block:28px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 main{max-width:1000px;margin:0 auto}
-header{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 20px;border-bottom:1px solid var(--rule);padding-bottom:14px;margin-bottom:24px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 24px;border-bottom:1px solid var(--rule);padding-bottom:14px;margin-bottom:24px}
+.ttl{display:flex;flex-direction:column;align-items:flex-start;gap:12px}
+.logo{display:block;height:34px;width:auto;max-width:100%;background:#000}
 h1{margin:0;font:700 34px/1 var(--mono);letter-spacing:-.02em}
 header p{margin:0;color:var(--dim);font-size:12px;min-width:0}
 .bench{display:grid;grid-template-columns:minmax(0,480px) minmax(0,1fr);gap:32px;align-items:start}
@@ -77,15 +79,17 @@ button.b:active{transform:translateY(1px)}
 .notes p{margin:0;font-size:12px;max-width:44ch}
 .notes b{display:block;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:400;margin-bottom:3px}
 .msg{min-height:1.5em;color:var(--dim);font-size:11px;margin:0}
-.brand{margin-top:40px;background:#000;color:#8a9288;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 24px;padding:14px 20px}
-.brand img{display:block;height:46px;width:auto;max-width:100%}
-.brand span{font-size:11px;letter-spacing:.06em}
+.credit{margin-top:34px;border-top:1px solid var(--rule);padding-top:14px;display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 24px;font-size:11px;letter-spacing:.06em;color:var(--dim)}
+.credit b{color:var(--fg);font-weight:700}
 @media (prefers-reduced-motion:reduce){button.b:active{transform:none}}
 </style>
 
 <main>
   <header>
-    <h1>Register</h1>
+    <div class="ttl">
+      <h1>Register</h1>
+      <img class="logo" src="plantssystem-logo.png" width="472" height="128" alt="PlantsSystem">
+    </div>
     <p>8-bit LFSR → sine / noise / pulse / sub / long reverb. Web Audio edition of the Pico 2 instrument.</p>
   </header>
 
@@ -131,8 +135,8 @@ button.b:active{transform:translateY(1px)}
     <p><b>Sub &amp; reverb</b>A 41 Hz sub kick on every 16th. One long-reverb note (RT60 about 7 s) lands somewhere in every 2 bars. 超低域の16ビートと、2小節に1音のロングリバーブ。</p>
     <p><b>Screen</b>The tesseract's pose is the number. Left column: LFSR value. Right column: raw counter. Barcode: last ten steps. 立体の姿勢が数値。</p>
   </section>
-  <footer class="brand">
-    <img src="plantssystem-logo.png" width="472" height="128" alt="PlantsSystem">
+  <footer class="credit">
+    <span>created by <b>osamu/plantssystem</b></span>
     <span>Pico 2 / RP2350 · Web Audio edition</span>
   </footer>
 </main>
