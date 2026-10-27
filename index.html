@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="Register: an 8-bit LFSR drives sine, noise, pulse, sub kick and a long reverb through Web Audio.">
+</head>
+<body>
+<title>Register</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&display=swap">
+<style>
+/* layout: a test-pattern bench. The 240x240 LCD of the Pico build on the left, a plain parameter strip on the right.
+   Monochrome on purpose: the only "colour" is inversion. */
+:root{
+  --bg:#e7e9eb; --fg:#0a0a0b; --dim:#5f656b; --rule:#0a0a0b; --soft:#d3d6d9;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){--bg:#0b0c0d;--fg:#e9ebed;--dim:#8b9197;--rule:#e9ebed;--soft:#1d2022;color-scheme:dark}
+}
+:root[data-theme="dark"]{--bg:#0b0c0d;--fg:#e9ebed;--dim:#8b9197;--rule:#e9ebed;--soft:#1d2022;color-scheme:dark}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:13px/1.55 var(--mono);
+  padding-block:28px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:1000px;margin:0 auto}
+header{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 20px;border-bottom:1px solid var(--rule);padding-bottom:14px;margin-bottom:24px}
+h1{margin:0;font:700 34px/1 var(--mono);letter-spacing:-.02em}
+header p{margin:0;color:var(--dim);font-size:12px;min-width:0}
+.bench{display:grid;grid-template-columns:minmax(0,480px) minmax(0,1fr);gap:32px;align-items:start}
+@media (max-width:860px){.bench{grid-template-columns:minmax(0,1fr)}}
+.screen{min-width:0}
+.screen .frame{border:1px solid var(--rule);line-height:0;background:#fff}
+canvas{display:block;width:100%;aspect-ratio:1;max-width:100%}
+.readout{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:8px;color:var(--dim);font-size:11px;letter-spacing:.04em;font-variant-numeric:tabular-nums}
+.panel{min-width:0;display:flex;flex-direction:column;gap:22px}
+.label{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin:0 0 8px}
+.params{display:flex;flex-direction:column;border-top:1px solid var(--rule)}
+.row{display:grid;grid-template-columns:78px minmax(0,1fr) 44px;align-items:center;gap:12px;border-bottom:1px solid var(--soft);padding:2px 8px 2px 0}
+.row .name{all:unset;cursor:pointer;padding:7px 8px;font:inherit;letter-spacing:.04em}
+.row .name:focus-visible{outline:2px solid var(--fg);outline-offset:-2px}
+.row output{text-align:right;font-variant-numeric:tabular-nums}
+.row.sel{background:var(--fg);color:var(--bg)}
+.row.sel .name{color:var(--bg)}
+input[type=range]{color:inherit;-webkit-appearance:none;appearance:none;width:100%;height:22px;background:transparent;margin:0;cursor:pointer;min-width:0}
+input[type=range]::-webkit-slider-runnable-track{height:1px;background:currentColor}
+input[type=range]::-moz-range-track{height:1px;background:currentColor}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:9px;height:15px;margin-top:-7px;background:currentColor;border:0;border-radius:0}
+input[type=range]::-moz-range-thumb{width:9px;height:15px;background:currentColor;border:0;border-radius:0}
+input[type=range]:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.btns{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px}
+button.b{font:700 12px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--fg);background:transparent;border:1px solid var(--rule);padding:10px 8px;cursor:pointer;border-radius:0}
+button.b[aria-pressed=true],button.b.primary{background:var(--fg);color:var(--bg)}
+button.b:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+button.b:active{transform:translateY(1px)}
+.keys{display:grid;grid-template-columns:auto 1fr;gap:2px 14px;font-size:11px;color:var(--dim);margin:0}
+.keys dt{color:var(--fg)}
+.keys dd{margin:0}
+.notes{margin-top:34px;border-top:1px solid var(--rule);padding-top:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px 32px}
+.notes p{margin:0;font-size:12px;max-width:44ch}
+.notes b{display:block;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:400;margin-bottom:3px}
+.msg{min-height:1.5em;color:var(--dim);font-size:11px;margin:0}
+@media (prefers-reduced-motion:reduce){button.b:active{transform:none}}
+</style>
+
+<main>
+  <header>
+    <h1>Register</h1>
+    <p>8-bit LFSR → sine / noise / pulse / sub / long reverb. Web Audio edition of the Pico 2 instrument.</p>
+  </header>
+
+  <div class="bench">
+    <section class="screen" aria-label="Register display">
+      <div class="frame"><canvas id="scr" width="480" height="480" aria-label="Register LCD: barcode, tesseract wireframe and binary code"></canvas></div>
+      <div class="readout"><span id="ro1">LFSR 0xA5 · 10100101</span><span id="ro2">step --/16</span><span id="ro3">44.1 kHz</span></div>
+    </section>
+
+    <section class="panel" aria-label="Controls">
+      <div>
+        <p class="label">Transport</p>
+        <div class="btns">
+          <button class="b primary" id="bGo" type="button">Start</button>
+          <button class="b" id="bMute" type="button" aria-pressed="false">Mute</button>
+          <button class="b" id="bRand" type="button" aria-pressed="true">Rand dens</button>
+          <button class="b" id="bSeed" type="button">Reseed</button>
+          <button class="b" id="bInv" type="button" aria-pressed="true">Invert</button>
+        </div>
+        <p class="msg" id="msg" role="status"></p>
+      </div>
+      <div>
+        <p class="label">Parameters</p>
+        <div class="params" id="params"></div>
+      </div>
+      <div>
+        <p class="label">Keys</p>
+        <dl class="keys">
+          <dt>↑ ↓</dt><dd>change selected value</dd>
+          <dt>← → / X</dt><dd>select parameter</dd>
+          <dt>A</dt><dd>dens random on / off</dd>
+          <dt>B</dt><dd>reseed from another point</dd>
+          <dt>Y</dt><dd>invert the screen</dd>
+          <dt>Space</dt><dd>mute</dd>
+        </dl>
+      </div>
+    </section>
+  </div>
+
+  <section class="notes" aria-label="About">
+    <p><b>Bits → sines</b>An 8-bit LFSR steps on every 16th note. Each bit gates one sine voice, spaced by √2. 1ビットが1本のサイン波。</p>
+    <p><b>Number → pulse</b>When bits 0 or 2 flip, a click fires at 3–17 kHz. The value itself decides the pitch. 数値がそのまま周波数になる。</p>
+    <p><b>Sub &amp; reverb</b>A 41 Hz sub kick on every 16th. One long-reverb note (RT60 about 7 s) lands somewhere in every 2 bars. 超低域の16ビートと、2小節に1音のロングリバーブ。</p>
+    <p><b>Screen</b>The tesseract's pose is the number. Left column: LFSR value. Right column: raw counter. Barcode: last ten steps. 立体の姿勢が数値。</p>
+  </section>
+</main>
+
+<script>
+// Register DSP core. Port of TESTPATTERN.ino (core0). Self-contained: uses only Math,
+// so RegisterDSP.toString() can be shipped into an AudioWorklet.
+class RegisterDSP {
+  constructor(sr, post) {
+    this.sr = sr; this.post = post || function () {};
+    this.frame = 0;
+    this.P = { tempo: 120, pitch: 0, dens: 80, pulse: 6, noise: 7, sub: 8, verb: 8, level: 12 };
+    this.mute = false; this.densRand = true; this.reqReseed = false;
+    this.rng = 2463534242 >>> 0;
+    const T = this.sinTab = new Float32Array(2049);
+    for (let i = 0; i <= 2048; i++) T[i] = Math.sin(2 * Math.PI * i / 2048);
+
+    this.sv = [];
+    for (let i = 0; i < 8; i++) this.sv.push({ ph: 0, inc: 0, e: 0, tgt: 0, att: 0.01, rel: 0.01, amp: 0, gl: 0.7071, gr: 0.7071 });
+    this.nv = { e: 0, tgt: 0, att: 0.01, rel: 0.01, amp: 0, gl: 0.7071, gr: 0.7071, lp: 0, a: 0.35, left: -1 };
+    this.pv = [0, 1].map(() => ({ ph: 0, inc: 0, e: 0, tgt: 0, att: 0.01, rel: 0.01, amp: 0, gl: 0.7071, gr: 0.7071, left: -1, w: 1, wl: 0, pol: false }));
+    this.pvIdx = 0;
+    this.sub = { ph: 0, e: 0, g: 0, amp: 0, pe: 0 };
+
+    // long reverb: 8-line FDN
+    this.VN = 8;
+    this.VLEN = [1087, 1283, 1493, 1693, 1901, 2111, 2347, 2593];
+    this.VRT60 = 9.5; this.VDAMP = 0.30; this.VMOD = 5; this.VPD = 882;
+    this.vdl = this.VLEN.map(() => new Float32Array(4096));
+    this.vlp = new Float32Array(8); this.vg = new Float32Array(8);
+    this.vph = new Float64Array(8); this.vinc = new Float64Array(8); this.vmod = new Float32Array(8);
+    for (let i = 0; i < 8; i++) {
+      this.vg[i] = Math.pow(10, -3 * this.VLEN[i] / (this.VRT60 * sr));
+      this.vph[i] = 0.125 * i;
+      this.vinc[i] = (0.07 + 0.031 * i) / sr;
+    }
+    this.vw = 0; this.vpd = new Float32Array(2048); this.vpw = 0;
+    this.ap0 = new Float32Array(113); this.ap1 = new Float32Array(191); this.ap2 = new Float32Array(331);
+    this.ap0i = 0; this.ap1i = 0; this.ap2i = 0;
+    this.vOutL = 0; this.vOutR = 0;
+    this.vpPh = 0; this.vpInc = 0; this.vpN = 0; this.vpI = 0; this.vpAmp = 0; this.verbLeft = 0;
+    this.y = new Float32Array(8);
+
+    // sequencer
+    this.restSteps = 0; this.stepAcc = 0; this.curStepLen = 5000; this.gSm = 0;
+    this.p0Cnt = 0; this.lfsr = 0xA5; this.prevV = 0; this.subStep = 0; this.verbAt = -1;
+    this.sampleCnt = 0;
+    this.rL = 0; this.rR = 0; this.oL = 0; this.oR = 0;
+    this.restart(false);
+  }
+
+  xr() { let x = this.rng; x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0; this.rng = x; return x; }
+  frand() { return (this.xr() >>> 8) / 16777216; }
+  nrand() { return (this.xr() | 0) / 2147483648; }
+  sinLut(ph) { const x = ph * 2048, i = x | 0, T = this.sinTab; return T[i] + (T[i + 1] - T[i]) * (x - i); }
+  msToRate(ms) { return 1 / (ms * 0.001 * this.sr); }
+  pitchMul() { return Math.pow(2, this.P.pitch / 12); }
+
+  msg(m) {
+    if (m.set) { for (const k in m.set) this.P[k] = m.set[k]; }
+    if (m.cmd === 'reseed') this.reqReseed = true;
+    if (m.cmd === 'mute') this.mute = !!m.v;
+    if (m.cmd === 'densRand') this.densRand = !!m.v;
+  }
+
+  // ---- voices
+  svSet(i, f, a, pan, attMs, relMs) {
+    const v = this.sv[i];
+    if (f > 18000 || f < 15) { v.tgt = 0; return; }
+    v.inc = f / this.sr; v.amp = a;
+    v.gl = Math.cos(pan * 1.5707963); v.gr = Math.sin(pan * 1.5707963);
+    v.att = this.msToRate(attMs); v.rel = this.msToRate(relMs); v.tgt = 1;
+  }
+  svOff(i, relMs) { this.sv[i].tgt = 0; this.sv[i].rel = this.msToRate(relMs); }
+  noiseBurst(a, pan, len) {
+    const n = this.nv;
+    n.amp = a; n.gl = Math.cos(pan * 1.5707963); n.gr = Math.sin(pan * 1.5707963);
+    n.att = this.msToRate(0.1); n.rel = this.msToRate(1.0); n.tgt = 1;
+    n.left = len < 1 ? 1 : len;
+  }
+  pulseBurst(f, amp, pan, w, lenMs) {
+    const v = this.pv[this.pvIdx]; this.pvIdx ^= 1;
+    v.inc = f / this.sr; v.amp = amp;
+    v.gl = Math.cos(pan * 1.5707963); v.gr = Math.sin(pan * 1.5707963);
+    v.att = this.msToRate(0.05); v.rel = this.msToRate(0.2); v.tgt = 1;
+    v.w = w; v.left = ((lenMs * 0.001 * this.sr) | 0) + 1;
+    this.post({ k: 'kick', f: this.frame });
+  }
+  allOff() {
+    for (let i = 0; i < 8; i++) this.svOff(i, 1.0);
+    this.nv.tgt = 0; this.nv.rel = this.msToRate(1.0); this.nv.left = -1;
+    for (let i = 0; i < 2; i++) { this.pv[i].tgt = 0; this.pv[i].rel = this.msToRate(0.5); this.pv[i].left = -1; }
+    this.sub.e = 0;
+  }
+  subTrig(amp) {
+    const s = this.sub;
+    if (s.e < 0.02) s.ph = 0;
+    s.e = 1; s.amp = amp; s.pe = 1;
+  }
+
+  // ---- reverb
+  verbClear() {
+    for (const d of this.vdl) d.fill(0);
+    this.vlp.fill(0); this.vpd.fill(0); this.ap0.fill(0); this.ap1.fill(0); this.ap2.fill(0);
+    this.vOutL = this.vOutR = 0;
+  }
+  verbTrig(f, amp) {
+    this.vpInc = f / this.sr; this.vpAmp = amp; this.vpPh = 0;
+    this.vpN = (0.006 * this.sr) | 0; this.vpI = 0;
+    this.verbLeft = this.sr * 16;
+  }
+  ap(x, buf, len, which, g) {
+    const idx = this[which];
+    const d = buf[idx], v = x - g * d;
+    buf[idx] = v;
+    this[which] = (idx + 1 >= len) ? 0 : idx + 1;
+    return d + g * v;
+  }
+  verbProcess(inp) {
+    const vpd = this.vpd, y = this.y;
+    vpd[this.vpw] = inp;
+    let x = vpd[(this.vpw - this.VPD) & 2047];
+    this.vpw = (this.vpw + 1) & 2047;
+    x = this.ap(x, this.ap0, 113, 'ap0i', 0.7);
+    x = this.ap(x, this.ap1, 191, 'ap1i', 0.7);
+    x = this.ap(x, this.ap2, 331, 'ap2i', 0.7);
+    const upd = ((this.vw & 15) === 0), vw = this.vw;
+    for (let i = 0; i < 8; i++) {
+      if (upd) {
+        let p = this.vph[i] + this.vinc[i] * 16; p -= Math.floor(p); this.vph[i] = p;
+        this.vmod[i] = this.VMOD * this.sinLut(p);
+      }
+      const rp = (vw + 4096 - this.VLEN[i]) - this.vmod[i];
+      const i0 = Math.floor(rp), fr = rp - i0, d = this.vdl[i];
+      y[i] = d[i0 & 4095] * (1 - fr) + d[(i0 + 1) & 4095] * fr;
+    }
+    this.vOutL = (y[0] - y[2] + y[4] - y[6]) * 0.5;
+    this.vOutR = (y[1] - y[3] + y[5] - y[7]) * 0.5;
+    for (let h = 1; h < 8; h <<= 1)
+      for (let i = 0; i < 8; i += h << 1)
+        for (let j = i; j < i + h; j++) { const a = y[j], b = y[j + h]; y[j] = a + b; y[j + h] = a - b; }
+    const SGN = [1, -1, 1, 1, -1, 1, -1, -1];
+    for (let i = 0; i < 8; i++) {
+      const v = y[i] * 0.353553 * this.vg[i];
+      this.vlp[i] = v + this.VDAMP * (this.vlp[i] - v);
+      this.vdl[i][vw] = this.vlp[i] + x * 0.3 * SGN[i];
+    }
+    this.vw = (vw + 1) & 4095;
+  }
+
+  // ---- per-sample render
+  render() {
+    let L = 0, R = 0;
+    for (let i = 0; i < 8; i++) {
+      const v = this.sv[i];
+      if (v.e !== v.tgt) {
+        if (v.tgt > v.e) { v.e += v.att; if (v.e > v.tgt) v.e = v.tgt; }
+        else { v.e -= v.rel; if (v.e < v.tgt) v.e = v.tgt; }
+      }
+      if (v.e > 0) { const s = this.sinLut(v.ph) * v.e * v.amp; L += s * v.gl; R += s * v.gr; }
+      v.ph += v.inc; if (v.ph >= 1) v.ph -= 1;
+    }
+    const n = this.nv, x = this.nrand();
+    n.lp += n.a * (x - n.lp);
+    if (n.e !== n.tgt) {
+      if (n.tgt > n.e) { n.e += n.att; if (n.e > n.tgt) n.e = n.tgt; }
+      else { n.e -= n.rel; if (n.e < n.tgt) n.e = n.tgt; }
+    }
+    if (n.left > 0 && --n.left === 0) { n.tgt = 0; n.left = -1; }
+    if (n.e > 0) { const o = (x - n.lp) * n.e * n.amp; L += o * n.gl; R += o * n.gr; }
+
+    const s = this.sub;
+    if (s.e > 0.0005 || s.g > 0.0005) {
+      s.e *= 0.9995; s.pe *= 0.9985;
+      if (s.e > s.g) { s.g += 0.01; if (s.g > s.e) s.g = s.e; } else s.g = s.e;
+      s.ph += 41.2 * (1 + 1.2 * s.pe) / this.sr; s.ph -= Math.floor(s.ph);
+      const o = this.sinLut(s.ph) * s.g * s.amp * 0.7071;
+      L += o; R += o;
+    }
+
+    if (this.verbLeft > 0) {
+      let vin = 0;
+      if (this.vpI < this.vpN) {
+        const w = 0.5 - 0.5 * Math.cos(6.2831853 * this.vpI / this.vpN);
+        vin = this.sinLut(this.vpPh) * w * this.vpAmp;
+        this.vpPh += this.vpInc; if (this.vpPh >= 1) this.vpPh -= 1;
+        this.vpI++;
+      }
+      this.verbProcess(vin);
+      L += this.vOutL + vin * 0.35; R += this.vOutR + vin * 0.35;
+      if (--this.verbLeft === 0) this.verbClear();
+    }
+
+    for (let i = 0; i < 2; i++) {
+      const v = this.pv[i];
+      if (v.e !== v.tgt) {
+        if (v.tgt > v.e) { v.e += v.att; if (v.e > v.tgt) v.e = v.tgt; }
+        else { v.e -= v.rel; if (v.e < v.tgt) v.e = v.tgt; }
+      }
+      if (v.left > 0 && --v.left === 0) { v.tgt = 0; v.left = -1; }
+      let np = v.ph + v.inc;
+      if (np >= 1) { np -= 1; v.wl = v.w; v.pol = !v.pol; }
+      v.ph = np;
+      if (v.wl > 0) {
+        v.wl--;
+        if (v.e > 0) { const o = (v.pol ? 1 : -1) * v.e * v.amp; L += o * v.gl; R += o * v.gr; }
+      }
+    }
+    this.rL = L; this.rR = R;
+  }
+
+  softLim(x) {
+    if (x > 3) x = 3; else if (x < -3) x = -3;
+    return 0.98 * x * (27 + x * x) / (27 + 9 * x * x);
+  }
+
+  // ---- sequencer
+  calcStepLen() {
+    const s = this.sr * 60 / (this.P.tempo * 4), mn = this.sr / 48;
+    return s < mn ? mn : s;
+  }
+  restart(randomStart) {
+    this.restSteps = 3;
+    this.allOff();
+    this.post({ k: 'reset', f: this.frame });
+    this.p0Cnt = randomStart ? (this.xr() & 0xFFFF) : 0;
+    this.lfsr = randomStart ? ((this.xr() & 0xFF) | 1) : 0xA5;
+    this.prevV = 0; this.subStep = 0; this.verbAt = -1;
+    this.curStepLen = this.calcStepLen();
+  }
+  doStep() {
+    if (this.reqReseed) { this.reqReseed = false; this.restart(true); return; }
+    if (this.restSteps > 0) { this.restSteps--; return; }
+    this.barcodeStep();
+  }
+  barcodeStep() {
+    const P = this.P, sb = P.sub | 0;
+    const barStep = this.subStep & 15, phr = this.subStep % 32;
+    if (sb > 0) {
+      const acc = ((this.subStep & 3) === 0) ? 1 : ((this.subStep & 1) ? 0.45 : 0.7);
+      this.subTrig(sb * 0.07 * acc);
+    }
+    this.subStep++;
+    if (phr === 0) this.verbAt = this.xr() % 32;            // one long-reverb note somewhere in every 2 bars
+    if (phr === this.verbAt) {
+      const vb = P.verb | 0;
+      if (vb > 0) {
+        const H = [8, 10, 12, 16, 20];
+        this.verbTrig(98 * this.pitchMul() * H[this.xr() % 5], vb * 0.12);
+        this.post({ k: 'kick', f: this.frame });
+      }
+    }
+    this.p0Cnt = (this.p0Cnt + 1) & 0xFFFF;
+    this.lfsr = (this.lfsr >> 1) ^ ((-(this.lfsr & 1)) & 0xB8);
+    let v = this.lfsr & 0xFF;
+    const silent = this.frand() < (100 - P.dens) * 0.005;
+    if (silent) v = 0;
+    const pm = this.pitchMul();
+    let f = 98 * pm;
+    for (let b = 0; b < 8; b++) {
+      if (v & (1 << b)) this.svSet(b, f, 0.15 * (1 - 0.09 * b), 0.3 + 0.4 * b / 7, 0.4, 0.4);
+      else this.svOff(b, 0.4);
+      f *= 1.4142;
+    }
+    const tog = v ^ this.prevV; this.prevV = v;
+    if (!silent) {
+      const pulse = P.pulse | 0;
+      if (pulse > 0) {
+        let trig = (tog & 0x05) !== 0;
+        if (!trig && this.frand() < pulse * 0.012) trig = true;
+        if (trig) {
+          const LEN = [1.5, 3, 6, 12];
+          let pf = (3000 + v * 40) * pm; if (pf > 17000) pf = 17000;
+          this.pulseBurst(pf, pulse * 0.04, this.frand(), 1 + (this.xr() & 1), LEN[this.xr() & 3]);
+        }
+      }
+      const nz = P.noise | 0;
+      if (nz > 0) {
+        let trig = (v & 0xC3) === 0xC3;
+        if (!trig && this.frand() < nz * 0.01) trig = true;
+        if (trig) {
+          const M = [0.25, 0.5, 1.0];
+          this.noiseBurst(nz * 0.09, this.frand(), Math.floor(this.curStepLen * M[this.xr() % 3]));
+        }
+      }
+    }
+    this.post({ k: 'step', f: this.frame, a: barStep, b: v | ((this.p0Cnt >> 8) << 8), c: this.p0Cnt });
+  }
+
+  tick() {
+    this.stepAcc += 1;
+    if (this.stepAcc >= this.curStepLen) {
+      this.stepAcc -= this.curStepLen;
+      this.doStep();
+      this.curStepLen = this.calcStepLen();
+    }
+    this.sampleCnt++;
+    if (this.sampleCnt % (this.sr * 10) === 0 && this.densRand) {
+      let d = this.P.dens;
+      for (let t = 0; t < 4 && d === this.P.dens; t++) d = 10 + 5 * (this.xr() % 19);
+      this.P.dens = d;
+      this.post({ k: 'dens', v: d });
+    }
+    this.render();
+    const tg = this.mute ? 0 : this.P.level * 0.05;
+    this.gSm += (tg - this.gSm) * 0.002;
+    this.oL = this.softLim(this.rL * this.gSm);
+    this.oR = this.softLim(this.rR * this.gSm);
+    this.frame++;
+  }
+}
+if (typeof module !== 'undefined') module.exports = RegisterDSP;
+
+</script>
+
+<script>
+(() => {
+'use strict';
+// ------------------------------------------------------------ parameters
+const PN   = ['tempo','pitch','dens','pulse','noise','sub','verb','level'];
+const PMIN = {tempo:60,pitch:-12,dens:10,pulse:0,noise:0,sub:0,verb:0,level:0};
+const PMAX = {tempo:240,pitch:7,dens:100,pulse:10,noise:10,sub:10,verb:10,level:20};
+const PSTEP= {tempo:2,pitch:1,dens:5,pulse:1,noise:1,sub:1,verb:1,level:1};
+const val  = {tempo:120,pitch:0,dens:80,pulse:6,noise:7,sub:8,verb:8,level:12};
+let sel = 2;                       // starts on dens, like the hardware
+let densRand = true, muted = false, inv = true;
+
+const $ = id => document.getElementById(id);
+const fmt = (n,v) => n === 'pitch' ? (v > 0 ? '+' + v : String(v)) : String(v);
+
+// parameter strip
+const rows = {};
+PN.forEach((n, i) => {
+  const r = document.createElement('div'); r.className = 'row';
+  r.innerHTML = '<button class="name" type="button"></button><input type="range" aria-label=""><output></output>';
+  const b = r.querySelector('button'), s = r.querySelector('input'), o = r.querySelector('output');
+  b.textContent = n; s.setAttribute('aria-label', n); s.id = 'r-' + n;
+  s.min = PMIN[n]; s.max = PMAX[n]; s.step = PSTEP[n]; s.value = val[n];
+  b.addEventListener('click', () => { sel = i; paintSel(); });
+  s.addEventListener('input', () => { sel = i; setVal(n, +s.value, true); paintSel(); });
+  $('params').appendChild(r); rows[n] = { r, s, o };
+});
+function paintSel(){ PN.forEach((n, i) => rows[n].r.classList.toggle('sel', i === sel)); }
+function paintVal(n){ rows[n].s.value = val[n]; rows[n].o.textContent = fmt(n, val[n]); }
+function setVal(n, v, fromSlider){
+  v = Math.max(PMIN[n], Math.min(PMAX[n], v));
+  val[n] = v; paintVal(n);
+  send({ set: { [n]: v } });
+}
+PN.forEach(paintVal); paintSel();
+
+// ------------------------------------------------------------ audio
+let ctx = null, node = null, mode = 'none', playing = false, baseT = null, lat = 0;
+const evq = [];
+const SR = 44100;
+
+function send(m){ if (!node) return; if (mode === 'worklet') node.port.postMessage(m); else dspMain.msg(m); }
+let dspMain = null;
+
+const TAIL = `
+class RegProc extends AudioWorkletProcessor {
+  constructor(){ super(); this.d = new RegisterDSP(sampleRate, m => this.port.postMessage(m)); this.port.onmessage = e => this.d.msg(e.data); this.started = false; }
+  process(inputs, outputs){
+    if (!this.started){ this.started = true; this.port.postMessage({k:'hello', t: currentFrame / sampleRate}); }
+    const out = outputs[0], L = out[0], R = out[1] || out[0], d = this.d;
+    for (let n = 0; n < L.length; n++){ d.tick(); L[n] = d.oL; R[n] = d.oR; }
+    return true;
+  }
+}
+registerProcessor('register-dsp', RegProc);`;
+
+function onDspMsg(m){
+  if (m.k === 'hello') { baseT = m.t; return; }
+  if (m.k === 'dens') { val.dens = m.v; paintVal('dens'); return; }
+  evq.push(m);
+  if (evq.length > 400) evq.splice(0, evq.length - 400);
+}
+
+async function startAudio(){
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) throw new Error('Web Audio is not available in this browser.');
+  try { ctx = new AC({ sampleRate: SR, latencyHint: 'interactive' }); } catch (e) { ctx = new AC({ latencyHint: 'interactive' }); }
+  await ctx.resume();
+  $('ro3').textContent = (ctx.sampleRate / 1000).toFixed(1) + ' kHz';
+  lat = (ctx.outputLatency || 0) + (ctx.baseLatency || 0);
+  let ok = false;
+  if (ctx.audioWorklet && window.AudioWorkletNode) {
+    try {
+      const src = RegisterDSP.toString() + '\n' + TAIL;
+      const url = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
+      await ctx.audioWorklet.addModule(url);
+      node = new AudioWorkletNode(ctx, 'register-dsp', { numberOfInputs: 0, outputChannelCount: [2] });
+      node.port.onmessage = e => onDspMsg(e.data);
+      node.connect(ctx.destination);
+      mode = 'worklet'; ok = true;
+    } catch (e) { node = null; console.warn('worklet unavailable, using fallback:', e && e.message); }
+  }
+  if (!ok) {                                   // fallback: same DSP on the main thread
+    dspMain = new RegisterDSP(ctx.sampleRate, onDspMsg);
+    const sp = ctx.createScriptProcessor(2048, 0, 2);
+    sp.onaudioprocess = e => {
+      if (baseT === null) baseT = e.playbackTime;
+      const L = e.outputBuffer.getChannelData(0), R = e.outputBuffer.getChannelData(1);
+      for (let n = 0; n < L.length; n++) { dspMain.tick(); L[n] = dspMain.oL; R[n] = dspMain.oR; }
+    };
+    sp.connect(ctx.destination); node = sp; mode = 'script';
+  }
+  PN.forEach(n => send({ set: { [n]: val[n] } }));
+  send({ cmd: 'densRand', v: densRand }); send({ cmd: 'mute', v: muted });
+  playing = true;
+}
+
+// ------------------------------------------------------------ display state
+const cv = $('scr'), g = cv.getContext('2d');
+const FONT = '"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace';
+function fit(){
+  const k = Math.max(1, Math.ceil(cv.clientWidth * (window.devicePixelRatio || 1) / 240));
+  if (cv.width !== 240 * k) { cv.width = cv.height = 240 * k; }
+  g.setTransform(cv.width / 240, 0, 0, cv.width / 240, 0, 0);
+}
+new ResizeObserver(fit).observe(cv); fit();
+
+const C = () => inv ? { fg:'#000', bg:'#fff', dim:'#b5b6b5' } : { fg:'#fff', bg:'#000', dim:'#4a4d4a' };
+let col = C();
+function txt(s, x, y, c, w, size){ g.font = (w || 400) + ' ' + (size || 10) + 'px ' + FONT; g.textBaseline = 'alphabetic'; g.fillStyle = c; g.fillText(s, x, y + Math.round((size || 10) * 0.7)); }
+function rect(x, y, w, h, c){ g.fillStyle = c; g.fillRect(x, y, w, h); }
+
+// tesseract
+const WV = [], WE = [];
+for (let i = 0; i < 16; i++) { const v = []; for (let d = 0; d < 4; d++) v.push(((i >> d) & 1) ? 0.5 : -0.5); WV.push(v); }
+{ let mn = 1e9; const d2 = (i, j) => { let s = 0; for (let d = 0; d < 4; d++) { const t = WV[i][d] - WV[j][d]; s += t * t; } return s; };
+  for (let i = 0; i < 16; i++) for (let j = i + 1; j < 16; j++) mn = Math.min(mn, d2(i, j));
+  for (let i = 0; i < 16; i++) for (let j = i + 1; j < 16; j++) if (d2(i, j) < mn * 1.02) WE.push([i, j]); }
+let dA = 0, dB = 0, dC = 0, dKick = 0, dScale = 1, dMask = 0;
+const rot2 = (a, b, c, s) => [a * c - b * s, a * s + b * c];
+function drawWire(){
+  const cA = Math.cos(dA), sA = Math.sin(dA), cB = Math.cos(dB), sB = Math.sin(dB), cC = Math.cos(dC), sC = Math.sin(dC);
+  const c0 = 0.6967, s0 = 0.7174, sc = 30 * dScale * (1 + 0.18 * dKick);
+  const sx = [], sy = [], sz = [];
+  for (let i = 0; i < 16; i++) {
+    let [x, y, z, w] = WV[i];
+    [x, w] = rot2(x, w, cA, sA); [y, z] = rot2(y, z, cB, sB); [z, w] = rot2(z, w, cC, sC); [x, z] = rot2(x, z, c0, s0);
+    const k = 3 / (3 - w); x *= k; y *= k; z *= k;
+    const f = 5 / (5 - z);
+    sx.push(56 + x * sc * f); sy.push(56 - y * sc * f); sz.push(z);
+  }
+  g.save(); g.beginPath(); g.rect(64, 28, 112, 112); g.clip(); g.translate(64, 28);
+  g.lineWidth = 1;
+  for (const [a, b] of WE) {
+    g.strokeStyle = (sz[a] + sz[b]) > 0 ? col.fg : col.dim;
+    g.beginPath(); g.moveTo(sx[a], sy[a]); g.lineTo(sx[b], sy[b]); g.stroke();
+  }
+  g.fillStyle = col.fg;
+  for (let i = 0; i < 16; i++) if ((dMask >> i) & 1) g.fillRect(Math.round(sx[i]) - 1, Math.round(sy[i]) - 1, 3, 3);
+  g.restore();
+}
+
+// main-view state (mirrors the Pico firmware)
+const cells = new Array(10).fill(-1);
+let cursor = -1, dBar = -1, dBlank = 0;
+const bnV = new Array(10).fill(0), bnRaw = new Array(10).fill(0), bnOk = new Array(10).fill(false);
+let bnRow = 0, bnLast = -1, lastV = 0xA5;
+
+function applyEvent(e, now){
+  if (e.k === 'reset') {
+    cells.fill(-1); cursor = -1; dBar = -1; bnOk.fill(false); bnRow = 0; bnLast = -1; dMask = 0; dKick = 0;
+    dBlank = now + 300;
+    $('ro2').textContent = 'step --/16';
+  } else if (e.k === 'kick') { dKick = 1; }
+  else if (e.k === 'step') {
+    dBar = e.a & 15;
+    const cell = e.c % 10; cells[cell] = e.b & 0xFF; cursor = cell;
+    bnV[bnRow] = e.b & 0xFF; bnRaw[bnRow] = e.c & 0xFF; bnOk[bnRow] = true; bnLast = bnRow; bnRow = (bnRow + 1) % 10;
+    dMask = e.b; dA = (e.b & 0xFF) * (Math.PI * 2 / 256); dB = ((e.c >> 2) & 0xFF) * (Math.PI * 2 / 256);
+    lastV = e.b & 0xFF;
+    $('ro1').textContent = 'LFSR 0x' + lastV.toString(16).toUpperCase().padStart(2, '0') + ' · ' + lastV.toString(2).padStart(8, '0');
+    $('ro2').textContent = 'step ' + String(dBar + 1).padStart(2, '0') + '/16';
+  }
+}
+function pumpEvents(now){
+  if (!ctx || baseT === null) return;
+  const tNow = ctx.currentTime - lat;
+  while (evq.length && baseT + evq[0].f / ctx.sampleRate <= tNow) applyEvent(evq.shift(), now);
+}
+
+function drawMain(now){
+  rect(0, 0, 240, 240, col.bg);
+  txt('Register', 16, 12, col.fg, 700);
+  txt(muted ? 'mute' : (densRand ? 'rand' : 'hand'), 182, 12, col.fg);
+  if (now >= dBlank) drawWire();
+  for (let r = 0; r < 10; r++) if (bnOk[r]) {
+    const c = r === bnLast ? col.fg : col.dim, y = 30 + r * 11;
+    txt(bnV[r].toString(2).padStart(8, '0'), 10, y, c);
+    txt(bnRaw[r].toString(2).padStart(8, '0'), 182, y, c);
+  }
+  for (let i = 0; i < 10; i++) if (cells[i] >= 0) {
+    const x = 22 + i * 20;
+    for (let b = 0; b < 8;) {
+      if (cells[i] & (1 << b)) { const st = b; while (b < 8 && (cells[i] & (1 << b))) b++; rect(x + st * 2, 156, (b - st) * 2, 36, col.fg); }
+      else b++;
+    }
+  }
+  if (cursor >= 0) rect(22 + cursor * 20, 198, 16, 2, col.fg);
+  for (let i = 0; i < 16; i++) rect(27 + (i >> 2) * 48 + (i & 3) * 11, 204, 9, 4, i <= dBar ? col.fg : col.dim);
+  txt(PN[sel], 16, 218, col.dim);
+  txt(fmt(PN[sel], val[PN[sel]]), 52, 218, col.fg);
+}
+
+// ------------------------------------------------------------ splash (stateless, driven by t in ms)
+const hash = (a, b) => (Math.imul(a ^ 0x9E3779B1, 2654435761) ^ Math.imul(b + 0x7F4A7C15, 40503)) >>> 0;
+const BAR_X = 16, BAR_W = 208, BAR_Y = 152, BAR_H = 48, HL_Y = 146;
+const segW = []; { let a = 0, s = 0x9E3779B1; while (a < BAR_W) { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; let w = 1 + ((s >>> 8) % 7); if (a + w > BAR_W) w = BAR_W - a; segW.push(w); a += w; } }
+const NAME = 'Register', FOOT = 'sine / noise / pulse / sub / reverb';
+const T_SCAN = 900, T_COLLAPSE = 1400, T_WIRE0 = 1000, T_WIRE1 = 3000, T_LET0 = 2250, DT = 170, T_FOOT = 3700, T_FLASH = 5400, T_END = T_FLASH + 130;
+
+function drawBars(upTo, hMax){
+  let x = 0, on = true;
+  for (let i = 0; i < segW.length; i++) {
+    if (on && x < upTo) rect(BAR_X + x, BAR_Y, Math.min(segW[i], upTo - x), hMax, col.fg);
+    x += segW[i]; on = !on;
+  }
+}
+function drawSplash(t){
+  rect(0, 0, 240, 240, col.bg);
+  if (t < T_FOOT + 400) {
+    let s = ''; const h = hash(Math.floor(t / 70), 7);
+    for (let i = 0; i < 38; i++) s += (hash(h, i) >> 5) & 1 ? '1' : '0';
+    txt(s, 6, 8, col.dim);
+  }
+  if (t < T_COLLAPSE) {
+    const target = t >= T_SCAN ? BAR_W : Math.floor(BAR_W * t / T_SCAN);
+    drawBars(target, BAR_H);
+    if (t < T_SCAN) rect(BAR_X + target + 1, BAR_Y - 6, 2, BAR_H + 12, col.fg);
+  } else if (t < T_COLLAPSE + 450) {
+    drawBars(BAR_W, Math.floor(BAR_H * (1 - (t - T_COLLAPSE) / 450)));
+  }
+  if (t >= T_SCAN) { const k = Math.min(1, (t - T_SCAN) / 700), hw = Math.floor(BAR_W * 0.5 * k); rect(120 - hw, HL_Y, hw * 2, 1, col.fg); }
+  if (t >= T_WIRE0) {
+    const k = Math.min(1, (t - T_WIRE0) / (T_WIRE1 - T_WIRE0));
+    dScale = 1 - Math.pow(1 - k, 3);
+    const tt = t * 0.001; dA = tt * 1.3; dB = tt * 0.9; dC = tt * 1.7;
+    dKick = 0; dMask = hash(Math.floor(t / 90), 3) & 0xFFFF;
+    drawWire();
+  }
+  const L0 = T_LET0 - 2 * DT, TX = 47, TY = 156;
+  if (t >= L0) {
+    const resolved = t < T_LET0 ? 0 : Math.min(8, Math.floor((t - T_LET0) / DT) + 1);
+    for (let i = 0; i < 8; i++) {
+      if (t < L0 + i * DT) break;
+      const x = TX + i * 18;
+      if (i < resolved) {
+        txt(NAME[i], x, TY, col.fg, 700, 30);
+        txt(NAME.charCodeAt(i).toString(16).toUpperCase().padStart(2, '0'), x + 3, TY + 32, col.dim);
+      } else {
+        txt((hash(Math.floor(t / 40), i) >> 7) & 1 ? '1' : '0', x + 3, TY, col.dim, 700, 30);
+      }
+    }
+  }
+  if (t >= T_FOOT) {
+    const n = Math.min(FOOT.length, Math.floor((t - T_FOOT) / 18));
+    txt(FOOT.slice(0, n), 15, 214, col.dim);
+    if (n > 0) txt('web audio  44.1k  browser edition', 15, 226, col.dim);
+  }
+  if (t >= T_FLASH) { const h = Math.min(8, Math.floor((t - T_FLASH) / 14) + 1) * 15; rect(0, 120 - h, 240, h * 2, col.fg); }
+}
+function drawIdle(now){
+  rect(0, 0, 240, 240, col.bg);
+  txt('Register', 47, 96, col.fg, 700, 30);
+  rect(47, 126, 146, 1, col.fg);
+  txt(Math.floor(now / 500) % 2 ? 'press start' : '           ', 47, 136, col.dim);
+}
+
+// ------------------------------------------------------------ main loop
+let view = 'idle', splashT0 = 0, lastTs = 0;
+function frame(ts){
+  const dt = Math.min(100, ts - (lastTs || ts)); lastTs = ts;
+  col = C();
+  pumpEvents(ts);
+  if (view === 'main') {
+    dC += (0.03 + dKick * 0.15) * dt / 40;
+    dKick *= Math.pow(0.82, dt / 40); if (dKick < 0.02) dKick = 0;
+    drawMain(ts);
+  } else if (view === 'splash') {
+    const t = ts - splashT0;
+    if (t >= T_END) { view = 'main'; dScale = 1; dKick = 0; dMask = 0; dA = dB = dC = 0; evq.length = 0; cells.fill(-1); bnOk.fill(false); dBlank = ts + 300; drawMain(ts); }
+    else drawSplash(t);
+  } else drawIdle(ts);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ------------------------------------------------------------ controls
+function skipSplash(){ if (view === 'splash' && performance.now() - splashT0 > 300) splashT0 = performance.now() - T_END; }
+async function toggleGo(){
+  const msg = $('msg'); msg.textContent = '';
+  try {
+    if (!ctx) {
+      await startAudio();
+      view = 'splash'; splashT0 = performance.now(); dScale = 0; dBlank = 0;
+      $('bGo').textContent = 'Stop';
+    } else if (playing) { await ctx.suspend(); playing = false; $('bGo').textContent = 'Start'; }
+    else { await ctx.resume(); playing = true; $('bGo').textContent = 'Stop'; }
+  } catch (e) { msg.textContent = 'Audio could not start: ' + (e && e.message ? e.message : e); }
+}
+function setMute(v){ muted = v; $('bMute').setAttribute('aria-pressed', String(v)); send({ cmd: 'mute', v }); }
+function setRand(v){ densRand = v; $('bRand').setAttribute('aria-pressed', String(v)); send({ cmd: 'densRand', v }); }
+function setInv(v){ inv = v; $('bInv').setAttribute('aria-pressed', String(v)); }
+$('bGo').addEventListener('click', toggleGo);
+$('bMute').addEventListener('click', () => setMute(!muted));
+$('bRand').addEventListener('click', () => setRand(!densRand));
+$('bSeed').addEventListener('click', () => send({ cmd: 'reseed' }));
+$('bInv').addEventListener('click', () => setInv(!inv));
+cv.addEventListener('click', () => { if (view === 'splash') skipSplash(); else if (!ctx) toggleGo(); });
+
+document.addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const t = e.target, isRange = t && t.type === 'range', isBtn = t && t.tagName === 'BUTTON';
+  skipSplash();
+  const k = e.key;
+  if (isRange && k.startsWith('Arrow')) return;               // native slider keys
+  if (k === 'ArrowUp' || k === 'ArrowDown') { e.preventDefault(); const n = PN[sel]; setVal(n, val[n] + (k === 'ArrowUp' ? 1 : -1) * PSTEP[n]); }
+  else if (k === 'ArrowLeft') { e.preventDefault(); sel = (sel + 7) % 8; paintSel(); }
+  else if (k === 'ArrowRight' || k === 'x' || k === 'X') { e.preventDefault(); sel = (sel + 1) % 8; paintSel(); }
+  else if (k === 'a' || k === 'A') setRand(!densRand);
+  else if (k === 'b' || k === 'B') send({ cmd: 'reseed' });
+  else if (k === 'y' || k === 'Y') setInv(!inv);
+  else if (k === ' ' && !isBtn && !isRange) { e.preventDefault(); setMute(!muted); }
+});
+document.addEventListener('visibilitychange', () => { if (document.hidden) evq.length = Math.min(evq.length, 0); });
+})();
+</script>
+
+</body>
+</html>
